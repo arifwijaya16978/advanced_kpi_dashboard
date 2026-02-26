@@ -1,176 +1,176 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.express as px
 
-st.set_page_config(layout="wide")
+# =========================================
+# PAGE CONFIG
+# =========================================
 
-# =============================
-# THEME
-# =============================
-if "theme" not in st.session_state:
-    st.session_state.theme = "dark"
+st.set_page_config(
+    page_title="Advanced NOC KPI Dashboard",
+    layout="wide"
+)
 
-def toggle_theme():
-    st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
+st.title("📊 Advanced NOC KPI Monitoring")
 
-st.button("TOGGLE THEME", on_click=toggle_theme)
+# =========================================
+# LOAD DATA
+# =========================================
 
-template_style = "plotly_dark" if st.session_state.theme == "dark" else "plotly"
+@st.cache_data
+def load_data():
+    df = pd.read_csv("kpi_data.csv")
+    df.columns = df.columns.str.strip().str.lower()
+    return df
 
-st.title("📊 KPI Dashboard Performance")
+try:
+    df = load_data()
+except Exception as e:
+    st.error(f"Error loading CSV: {e}")
+    st.stop()
 
-# =============================
-# FILE UPLOAD
-# =============================
-file = st.file_uploader("Choose CSV File", type=["csv"])
+# =========================================
+# VALIDATION
+# =========================================
 
-if file:
+required_cols = ["date", "site", "traffic_gb", "availability", "lat", "lon"]
 
-    df = pd.read_csv(file)
+for col in required_cols:
+    if col not in df.columns:
+        st.error(f"Missing required column: {col}")
+        st.stop()
 
-    # CLEAN HEADER (ANTI SPASI)
-    df.columns = df.columns.str.strip()
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
+df = df.dropna(subset=["date"])
 
-    st.success(f"{len(df)} rows ready.")
+# =========================================
+# SIDEBAR FILTER
+# =========================================
 
-    # =============================
-    # RENAME COLUMN BIAR SERAGAM
-    # =============================
-    df = df.rename(columns={
-        "Date": "date",
-        "eNodeBName": "site",
-        "Sector": "sector",
-        "Band": "band",
-        "Payload": "payload",
-        "PRB": "prb",
-        "Availability": "availability",
-        "Lat": "lat",
-        "Lon": "lon"
-    })
+st.sidebar.header("🔎 Filters")
 
-    # CONVERT DATE
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+site_list = ["All"] + sorted(df["site"].dropna().unique())
+selected_site = st.sidebar.selectbox("Select Site", site_list)
 
-    # =============================
-    # FIX LAT LON (PENTING)
-    # =============================
-    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
-    df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
+date_range = st.sidebar.date_input(
+    "Select Date Range",
+    [df["date"].min(), df["date"].max()]
+)
 
-    # AUTO DETECT KEBALIK (Indonesia logic)
-    # Indonesia lat biasanya antara -11 sampai 6
-    if df["lat"].abs().mean() > 50:
-        st.warning("Lat/Lon seems reversed. Auto correcting...")
-        df[["lat", "lon"]] = df[["lon", "lat"]]
+if selected_site != "All":
+    df = df[df["site"] == selected_site]
 
-    # DROP KOORDINAT INVALID
-    df = df.dropna(subset=["lat", "lon"])
+df = df[
+    (df["date"] >= pd.to_datetime(date_range[0])) &
+    (df["date"] <= pd.to_datetime(date_range[1]))
+]
 
-    # =============================
-    # SIDEBAR FILTER
-    # =============================
-    st.sidebar.header("FILTER CONTROL")
+# =========================================
+# KPI SUMMARY
+# =========================================
 
-    site = st.sidebar.selectbox("Site", ["All"] + list(df["site"].unique()))
-    sector = st.sidebar.selectbox("Sector", ["All"] + list(df["sector"].unique()))
-    band = st.sidebar.selectbox("Band", ["All"] + list(df["band"].unique()))
+col1, col2, col3 = st.columns(3)
 
-    hide_marker = st.sidebar.checkbox("Hide Markers")
-    slim_line = st.sidebar.checkbox("Slim Lines")
+col1.metric("Total Sites", df["site"].nunique())
+col2.metric("Avg Availability (%)", f"{df['availability'].mean():.2f}")
+col3.metric("Total Traffic (GB)", f"{df['traffic_gb'].sum():,.0f}")
 
-    kpi_target = st.sidebar.number_input("Set KPI Target Line", value=0.0)
+st.divider()
 
-    start_date = st.sidebar.date_input("Start Date", df["date"].min())
-    end_date = st.sidebar.date_input("End Date", df["date"].max())
+# =========================================
+# CONGESTION DETECTION
+# =========================================
 
-    # =============================
-    # APPLY FILTER
-    # =============================
-    if site != "All":
-        df = df[df["site"] == site]
+st.subheader("🚨 Congestion Detection")
 
-    if sector != "All":
-        df = df[df["sector"] == sector]
+avail_threshold = st.slider("Availability Threshold (%)", 90, 100, 95)
 
-    if band != "All":
-        df = df[df["band"] == band]
+if "prb" in df.columns:
+    prb_threshold = st.slider("PRB Threshold (%)", 70, 100, 85)
+    df["congestion"] = (df["availability"] < avail_threshold) | (df["prb"] > prb_threshold)
+else:
+    df["congestion"] = df["availability"] < avail_threshold
 
-    df = df[(df["date"] >= pd.to_datetime(start_date)) &
-            (df["date"] <= pd.to_datetime(end_date))]
+congested = df[df["congestion"]]
 
-    # =============================
-    # CHART FUNCTION
-    # =============================
-    def create_chart(title, column):
+st.write("Total Congested Records:", congested.shape[0])
 
-        mode = "lines"
-        if not hide_marker:
-            mode = "lines+markers"
+if not congested.empty:
+    st.dataframe(congested)
+else:
+    st.success("No congestion detected")
 
-        line_width = 1 if slim_line else 3
+st.divider()
 
-        fig = go.Figure()
+# =========================================
+# SAFE CHART FUNCTION
+# =========================================
 
-        fig.add_trace(go.Scatter(
-            x=df["date"],
-            y=df[column],
-            mode=mode,
-            line=dict(width=line_width),
-            name=column
-        ))
+def create_chart(title, column):
 
-        if kpi_target != 0:
-            fig.add_hline(y=kpi_target, line_dash="dash", line_color="red")
-
-        fig.update_layout(
-            title=title,
-            template=template_style,
-            height=350
-        )
-
-        return fig
-
-    # =============================
-    # TABS
-    # =============================
-    tab1, tab2, tab3 = st.tabs([
-        "📈 Sector Productivity",
-        "📊 Site Summary",
-        "🗺 Geo Map"
-    ])
-
-    # =============================
-    # TAB 1
-    # =============================
-    def create_chart(title, column):
     if column not in df.columns:
         st.warning(f"Column '{column}' not found")
-        return px.line(title=f"{title} (No Data)")
+        return None
 
-    fig = px.line(df, x="date", y=column, title=title)
+    chart_df = df.groupby("date")[column].mean().reset_index()
+
+    fig = px.line(
+        chart_df,
+        x="date",
+        y=column,
+        title=title,
+        markers=True
+    )
+
     return fig
-    
-    with tab1:
-        st.plotly_chart(create_chart("Traffic Trend", "traffic_gb"), use_container_width=True)
-        st.plotly_chart(create_chart("PRB Trend", "prb"), use_container_width=True)
-        st.plotly_chart(create_chart("Availability Trend", "availability"), use_container_width=True)
 
-    # =============================
-    # TAB 2
-    # =============================
-    with tab2:
-        summary = df.groupby("site").mean(numeric_only=True)
-        st.dataframe(summary)
+# =========================================
+# TRAFFIC TREND
+# =========================================
 
-    # =============================
-    # TAB 3 (GEO MAP FIXED)
-    # =============================
-    with tab3:
+st.subheader("📈 Traffic Trend")
 
-        st.subheader("Site Location Map")
+traffic_chart = create_chart("Traffic (GB) Trend", "traffic_gb")
 
-        if len(df) > 0:
-            st.map(df[["lat", "lon"]])
-        else:
+if traffic_chart:
+    st.plotly_chart(traffic_chart, use_container_width=True)
 
-            st.info("No data available for selected filter.")
+# =========================================
+# AVAILABILITY TREND
+# =========================================
+
+st.subheader("📉 Availability Trend")
+
+avail_chart = create_chart("Availability Trend", "availability")
+
+if avail_chart:
+    st.plotly_chart(avail_chart, use_container_width=True)
+
+st.divider()
+
+# =========================================
+# MAP
+# =========================================
+
+st.subheader("🗺 Site Location Map")
+
+map_df = df.dropna(subset=["lat", "lon"])
+
+if not map_df.empty:
+
+    fig_map = px.scatter_mapbox(
+        map_df,
+        lat="lat",
+        lon="lon",
+        color="availability",
+        hover_name="site",
+        zoom=6,
+        height=600
+    )
+
+    fig_map.update_layout(mapbox_style="open-street-map")
+
+    st.plotly_chart(fig_map, use_container_width=True)
+
+else:
+    st.warning("No valid lat/lon data available")
