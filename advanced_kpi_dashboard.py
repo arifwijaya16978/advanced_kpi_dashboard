@@ -14,20 +14,21 @@ st.set_page_config(
 st.title("📊 Advanced NOC KPI Monitoring")
 
 # =========================================
+# FILE UPLOADER
+# =========================================
+
+uploaded_file = st.file_uploader("Upload KPI CSV File", type=["csv"])
+
+if uploaded_file is None:
+    st.info("Please upload a CSV file to start.")
+    st.stop()
+
+# =========================================
 # LOAD DATA
 # =========================================
 
-@st.cache_data
-def load_data():
-    df = pd.read_csv("kpi_data.csv")
-    df.columns = df.columns.str.strip().str.lower()
-    return df
-
-try:
-    df = load_data()
-except Exception as e:
-    st.error(f"Error loading CSV: {e}")
-    st.stop()
+df = pd.read_csv(uploaded_file)
+df.columns = df.columns.str.strip().str.lower()
 
 # =========================================
 # VALIDATION
@@ -103,7 +104,7 @@ else:
 st.divider()
 
 # =========================================
-# SAFE CHART FUNCTION
+# CHART FUNCTION
 # =========================================
 
 def create_chart(title, column):
