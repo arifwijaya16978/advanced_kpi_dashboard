@@ -7,11 +7,11 @@ import plotly.express as px
 # =========================================
 
 st.set_page_config(
-    page_title="Advanced NOC KPI Dashboard",
+    page_title="KPI Dashboard",
     layout="wide"
 )
 
-st.title("📊 Advanced NOC KPI Monitoring")
+st.title("📊 KPI Monitoring")
 
 # =========================================
 # FILE UPLOADER
@@ -175,3 +175,4 @@ if not map_df.empty:
 
 else:
     st.warning("No valid lat/lon data available")
+
