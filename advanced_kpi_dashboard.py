@@ -142,8 +142,16 @@ if file:
     # =============================
     # TAB 1
     # =============================
+    def create_chart(title, column):
+    if column not in df.columns:
+        st.warning(f"Column '{column}' not found")
+        return px.line(title=f"{title} (No Data)")
+
+    fig = px.line(df, x="date", y=column, title=title)
+    return fig
+    
     with tab1:
-        st.plotly_chart(create_chart("Payload Trend", "payload"), use_container_width=True)
+        st.plotly_chart(create_chart("Traffic Trend", "traffic_gb"), use_container_width=True)
         st.plotly_chart(create_chart("PRB Trend", "prb"), use_container_width=True)
         st.plotly_chart(create_chart("Availability Trend", "availability"), use_container_width=True)
 
@@ -164,4 +172,5 @@ if file:
         if len(df) > 0:
             st.map(df[["lat", "lon"]])
         else:
+
             st.info("No data available for selected filter.")
